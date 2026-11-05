@@ -39,3 +39,4 @@ databases:
     region: frankfurt
     databaseName: nakrutkadb
     user: postgres
+

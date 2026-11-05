@@ -218,39 +218,62 @@ async function forwardReceiptToAdmin(receiptInfo) {
             `🕒 <b>Vaqt:</b> ${new Date().toLocaleString('uz-UZ')}\n\n` +
             `👇 <i>Qabul qilish summasini tanlang yoki rad eting:</i>`;
 
-        const keyboard = Markup.inlineKeyboard([
-            [
-                Markup.button.callback('✅ 5,000 so\'m', `adm_appr_${receiptId}_5000`),
-                Markup.button.callback('✅ 10,000 so\'m', `adm_appr_${receiptId}_10000`),
-                Markup.button.callback('✅ 15,000 so\'m', `adm_appr_${receiptId}_15000`)
-            ],
-            [
-                Markup.button.callback('✅ 20,000 so\'m', `adm_appr_${receiptId}_20000`),
-                Markup.button.callback('✅ 50,000 so\'m', `adm_appr_${receiptId}_50000`),
-                Markup.button.callback('✅ 100,000 so\'m', `adm_appr_${receiptId}_100000`)
-            ],
-            [
-                Markup.button.callback('✍️ Boshqa summa', `adm_custom_${receiptId}`),
-                Markup.button.callback('❌ Rad etish', `adm_reject_${receiptId}`)
-            ]
-        ]);
+        // inline_keyboard to'g'ri formatda (spread emas, to'g'ridan-to'g'ri)
 
         let buf = photoBuffer;
         if (!buf && fileId) {
             buf = await getPhotoBuffer(fileId);
         }
 
+        const inlineKeyboard = {
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        { text: "✅ 5,000 so'm", callback_data: `adm_appr_${receiptId}_5000` },
+                        { text: "✅ 10,000 so'm", callback_data: `adm_appr_${receiptId}_10000` },
+                        { text: "✅ 15,000 so'm", callback_data: `adm_appr_${receiptId}_15000` }
+                    ],
+                    [
+                        { text: "✅ 20,000 so'm", callback_data: `adm_appr_${receiptId}_20000` },
+                        { text: "✅ 50,000 so'm", callback_data: `adm_appr_${receiptId}_50000` },
+                        { text: "✅ 100,000 so'm", callback_data: `adm_appr_${receiptId}_100000` }
+                    ],
+                    [
+                        { text: "✍️ Boshqa summa", callback_data: `adm_custom_${receiptId}` },
+                        { text: "❌ Rad etish", callback_data: `adm_reject_${receiptId}` }
+                    ]
+                ]
+            }
+        };
+
         if (buf) {
-            await adminBot.telegram.sendPhoto(adminId, { source: buf }, {
+            await adminBot.telegram.sendPhoto(adminId, { source: Buffer.from(buf) }, {
                 caption: captionText,
                 parse_mode: 'HTML',
-                ...keyboard
+                reply_markup: inlineKeyboard.reply_markup
             });
         } else {
-            await adminBot.telegram.sendMessage(adminId, captionText, {
-                parse_mode: 'HTML',
-                ...keyboard
-            });
+            // Rasm yo'q - fileId orqali yuborish
+            if (fileId) {
+                try {
+                    await adminBot.telegram.sendPhoto(adminId, fileId, {
+                        caption: captionText,
+                        parse_mode: 'HTML',
+                        reply_markup: inlineKeyboard.reply_markup
+                    });
+                } catch (photoErr) {
+                    console.error('[sendPhoto fileId error]:', photoErr.message);
+                    await adminBot.telegram.sendMessage(adminId, captionText, {
+                        parse_mode: 'HTML',
+                        reply_markup: inlineKeyboard.reply_markup
+                    });
+                }
+            } else {
+                await adminBot.telegram.sendMessage(adminId, captionText, {
+                    parse_mode: 'HTML',
+                    reply_markup: inlineKeyboard.reply_markup
+                });
+            }
         }
 
         console.log(`✅ [ADMIN BOT] Chek #${receiptId} adminga yetkazildi!`);
@@ -341,12 +364,33 @@ adminBot.action(/^adm_reject_(\d+)$/, async (ctx) => {
                 `🕒 Vaqt: ${new Date().toLocaleString('uz-UZ')}`,
                 {
                     parse_mode: 'HTML',
-                    ...Markup.inlineKeyboard([
-                        [Markup.button.callback('❌ Rad etilgan', 'noop')]
-                    ])
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '❌ Rad etilgan', callback_data: 'noop' }]
+                        ]
+                    }
                 }
             );
-        } catch (_) {}
+        } catch (_) {
+            // Rasm yo'q (text xabar) - editMessageText ishlatamiz
+            try {
+                await ctx.editMessageText(
+                    `🧾 <b>TO'LOV CHEKI (#${receiptId})</b>\n\n` +
+                    `🆔 Foydalanuvchi: <code>${receipt.telegram_id}</code>\n` +
+                    `❌ <b>RAD ETILDI!</b>\n` +
+                    `👨‍💻 Ko'rib chiqqan: @${escapeHtml(ctx.from.username || ctx.from.first_name)}\n` +
+                    `🕒 Vaqt: ${new Date().toLocaleString('uz-UZ')}`,
+                    {
+                        parse_mode: 'HTML',
+                        reply_markup: {
+                            inline_keyboard: [
+                                [{ text: '❌ Rad etilgan', callback_data: 'noop' }]
+                            ]
+                        }
+                    }
+                );
+            } catch (__) {}
+        }
 
         // Asosiy bot orqali foydalanuvchiga xabar berish
         if (mainBotInstance) {
@@ -453,12 +497,28 @@ async function processReceiptApproval(ctx, receiptId, amount) {
             `🕒 <b>Vaqt:</b> ${new Date().toLocaleString('uz-UZ')}`;
 
         if (ctx.callbackQuery && ctx.editMessageCaption) {
-            await ctx.editMessageCaption(approvedText, {
-                parse_mode: 'HTML',
-                ...Markup.inlineKeyboard([
-                    [Markup.button.callback(`✅ Tasdiqlandi (+${amount.toLocaleString('uz-UZ')} so'm)`, 'noop')]
-                ])
-            });
+            try {
+                await ctx.editMessageCaption(approvedText, {
+                    parse_mode: 'HTML',
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: `✅ Tasdiqlandi (+${amount.toLocaleString('uz-UZ')} so'm)`, callback_data: 'noop' }]
+                        ]
+                    }
+                });
+            } catch (captionErr) {
+                // Rasm yo'q bo'lsa text xabar
+                try {
+                    await ctx.editMessageText(approvedText, {
+                        parse_mode: 'HTML',
+                        reply_markup: {
+                            inline_keyboard: [
+                                [{ text: `✅ Tasdiqlandi (+${amount.toLocaleString('uz-UZ')} so'm)`, callback_data: 'noop' }]
+                            ]
+                        }
+                    });
+                } catch (_) {}
+            }
         } else {
             await ctx.reply(approvedText, { parse_mode: 'HTML' });
         }
@@ -477,10 +537,12 @@ async function processReceiptApproval(ctx, receiptId, amount) {
                 `<i>Barcha cheklovlar yechildi! Endi menyudan xohlagan xizmatni tanlab buyurtma berishingiz mumkin.</i>`,
                 {
                     parse_mode: 'HTML',
-                    ...Markup.inlineKeyboard([
-                        [Markup.button.callback('📸 Instagram xizmatlari', 'open_ig_menu')],
-                        [Markup.button.callback('💰 Balansni ko\'rish', 'open_balance_btn')]
-                    ])
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '📸 Instagram xizmatlari', callback_data: 'open_ig_menu' }],
+                            [{ text: '💰 Balansni ko\'rish', callback_data: 'open_balance_btn' }]
+                        ]
+                    }
                 }
             );
         } catch (notifyErr) {

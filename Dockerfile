@@ -19,3 +19,4 @@ EXPOSE 3000
 
 ENTRYPOINT ["/usr/bin/dumb-init", "--"]
 CMD ["node", "server.js"]
+
